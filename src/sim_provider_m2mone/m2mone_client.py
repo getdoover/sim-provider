@@ -50,7 +50,6 @@ class SimLookup:
         return {
             "iccid": self.iccid,
             "status": self.status.value,
-            "in_account": self.status == LookupStatus.IN_ACCOUNT,
             "details": self.details,
             "usage": self.usage,
             "error": self.error,

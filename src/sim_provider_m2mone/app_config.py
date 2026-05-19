@@ -8,7 +8,7 @@ from pydoover.processor import (
 )
 
 
-class M2MOneIntegrationConfig(config.Schema):
+class M2MOneSimProviderConfig(config.Schema):
 
     permissions = ExtendedPermissionsConfig()
     schedule = ScheduleConfig(
@@ -41,6 +41,6 @@ class M2MOneIntegrationConfig(config.Schema):
 
 
 def export():
-    M2MOneIntegrationConfig.export(
-        Path(__file__).parents[2] / "doover_config.json", "m2mone_integration"
+    M2MOneSimProviderConfig.export(
+        Path(__file__).parents[2] / "doover_config.json", "sim_provider_m2mone"
     )

@@ -35,3 +35,8 @@ venv/
 package.zip
 packages_export
 requirements.txt
+
+widget/node_modules
+widget/assets
+widget/dist
+

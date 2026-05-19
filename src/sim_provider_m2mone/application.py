@@ -1,24 +1,24 @@
-"""M2M One integration: reconcile assigned-device SIM cards on a schedule."""
+"""M2M One SIM provider: reconcile assigned-device SIM cards on a schedule."""
 import asyncio
 import logging
-import time
 from typing import Any
 
 from pydoover.processor import Application
 from pydoover.models import DeploymentEvent, ScheduleEvent
 
-from .app_config import M2MOneIntegrationConfig
+from .app_config import M2MOneSimProviderConfig
 from .m2mone_client import LookupStatus, M2MOneClient, M2MOneError, SimLookup
 
 log = logging.getLogger(__name__)
 
 HARDWARE_CHANNEL = "dv-hardware"
-SIM_CHANNEL = "m2m-simcard"
+SIM_CHANNEL = "sim-card"
+PROVIDER = "m2mone"
 
 
-class M2MOneIntegrationApplication(Application):
-    config: M2MOneIntegrationConfig
-    config_cls = M2MOneIntegrationConfig
+class M2MOneSimProviderApp(Application):
+    config: M2MOneSimProviderConfig
+    config_cls = M2MOneSimProviderConfig
 
     async def on_schedule(self, event: ScheduleEvent):
         await self._scan("schedule")
@@ -51,7 +51,7 @@ class M2MOneIntegrationApplication(Application):
 
             await asyncio.gather(
                 *(
-                    self._reconcile_device(client, agent_id, iccids.get(agent_id), account_sims)
+                    self._reconcile_device(agent_id, iccids.get(agent_id), account_sims)
                     for agent_id in devices
                 )
             )
@@ -75,7 +75,6 @@ class M2MOneIntegrationApplication(Application):
 
     async def _reconcile_device(
         self,
-        client: M2MOneClient,
         agent_id: int,
         iccid: str | None,
         account_sims: dict[str, dict[str, Any]],
@@ -99,8 +98,7 @@ class M2MOneIntegrationApplication(Application):
 
         payload = {
             **lookup.to_dict(),
-            "agent_id": agent_id,
-            "checked_at": int(time.time() * 1000),
+            "provider": PROVIDER,
             "configured_account_id": self.config.account_id.value,
         }
 

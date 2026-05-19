@@ -1,22 +1,38 @@
-# M2M One Integration
+# SIM Provider
 
-A Doover **integration** (organisation-scoped app) that periodically reconciles each assigned
-device's SIM card with an **M2M One Control Centre** account.
+Doover apps for fleet SIM-card visibility:
 
-## What it does
+| App | Type | What it does |
+|-----|------|---------------|
+| **M2M One SIM Provider** (`sim_provider_m2mone`) | Integration | On a schedule, looks up every assigned device's SIM ICCID in an M2M One Control Centre account and writes the result (status + month-to-date usage) to that device's `sim-card` channel. |
+| **Fleet SIM Usage Dashboard** (`sim_dashboard`) | Org-level app | Reads the `sim-card` channel across every device it has permission to see and renders totals, heavy users, and a per-SIM table. |
 
-On every scheduled run the integration:
+More provider integrations (Telstra IoT, KORE, etc.) can be added as new `src/sim_provider_<name>/` packages — they only need to agree on the shared `sim-card` payload shape so the dashboard treats them uniformly.
 
-1. Iterates every device it has been granted access to via `dv_proc_extended_permissions`.
-2. Reads the device's `dv-hardware` channel and pulls the SIM ICCID out of the `modem` snapshot.
-3. Calls the configured M2M One Control Centre REST API to fetch device details and current
-   billing-cycle usage for that ICCID.
-4. Writes the consolidated result back to that device's `m2m-simcard` channel — both as a
-   replaced aggregate (current state) and as an appended message (history).
+## Shared payload
 
-The result includes a top-level `in_account` flag — `true` if the ICCID is registered against
-the configured M2M One account, `false` if the API returned not-found, and `unknown` if the
-lookup failed for any other reason.
+Every provider writes the same shape to `sim-card`:
+
+```jsonc
+{
+  "iccid": "8961...",
+  "status": "in_account" | "not_in_account" | "error",
+  "in_account": true,
+  "details": { /* provider-specific row */ },
+  "usage": {
+    "month_to_date_data_mb": 123.4,
+    "month_to_date_sms": 0,
+    "month_to_date_voice": 0
+    /* … */
+  },
+  "error": null,
+  "provider": "m2mone",
+  "checked_at": 1716057600000,
+  "configured_account_id": "100020620"
+}
+```
+
+The aggregate is replaced on every successful run and a matching message is appended for history.
 
 ## Structure
 
@@ -25,37 +41,39 @@ README.md
 pyproject.toml
 doover_config.json
 build.sh
-src/integration/
-  __init__.py        # lambda handler entrypoint
-  application.py     # M2MOneIntegrationApplication.on_schedule
-  app_config.py      # config schema
-  m2mone_client.py   # aiohttp wrapper for Control Centre REST API
+src/sim_provider_m2mone/
+  __init__.py        # lambda handler
+  application.py     # M2MOneSimProviderApp.on_schedule
+  app_config.py
+  m2mone_client.py   # aiohttp wrapper for the Jasper Control Center REST API
+src/sim_dashboard/
+  __init__.py
+  application.py     # SimDashboardApp.on_deployment (pings connection)
+  app_config.py
+  app_ui.py          # remote-component UI schema
+widget/              # rsbuild + module-federation widget bundle (FleetSimUsageWidget)
 tests/
-  test_imports.py
 ```
-
-## API
-
-The M2M One Control Centre runs on a Cisco Jasper Control Center backend. The default base
-URL (`https://rws.jasper.com/rws/api/v1`) and the **username + API key** Basic-auth credentials
-must be configured on each install.
-
-Endpoints used:
-
-- `GET /devices/{iccid}` — SIM details (status, ratePlan, accountId, …)
-- `GET /devices/{iccid}/ctdUsages` — current cycle data/SMS/voice usage
 
 ## Running locally
 
 ```bash
 uv sync
 uv run pytest -v
-uv run export-config_integration   # regenerate doover_config.json
+
+# regenerate doover_config.json (split across 3 commands)
+uv run export-config-m2mone
+uv run export-config-dashboard
+uv run export-ui-dashboard
+
+# build the widget
+npm --prefix widget install
+npm --prefix widget run build
 ```
 
 ## Deployment
 
 ```bash
-./build.sh                          # builds package.zip for the lambda
-doover app publish --profile dv2    # publishes config
+./build.sh                          # builds package.zip for the lambdas
+doover app publish --profile dv2    # publishes both apps + widget
 ```
