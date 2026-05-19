@@ -1,0 +1,298 @@
+{
+    "m2mone_integration": {
+        "name": "m2mone_integration",
+        "display_name": "M2M One Integration",
+        "type": "INT",
+        "visibility": "PUB",
+        "allow_many": true,
+        "description": "Reconciles assigned-device SIM cards against an M2M One Control Centre account on a schedule.",
+        "long_description": "README.md",
+        "depends_on": [],
+        "owner_org_key": "",
+        "image_name": "ghcr.io/getdoover/m2mone-integration:main",
+        "export_config_command": "export-config_integration",
+        "container_registry_profile_key": "",
+        "build_args": "--platform linux/amd64,linux/arm64",
+        "export_ui_command": "NO_EXPORT",
+        "lambda_config": {
+            "Environment": {},
+            "Runtime": "python3.13",
+            "Timeout": 300,
+            "Handler": "src.integration.handler",
+            "MemorySize": 128,
+            "Architectures": [
+                "arm64"
+            ]
+        },
+        "config_schema": {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$id": "",
+            "title": "$default",
+            "type": "object",
+            "properties": {
+                "dv_proc_extended_permissions": {
+                    "title": "Devices",
+                    "x-name": "dv_proc_extended_permissions",
+                    "x-hidden": false,
+                    "type": "object",
+                    "x-required": true,
+                    "description": "Give Permission to access devices.",
+                    "x-position": 0,
+                    "properties": {
+                        "devices": {
+                            "title": "Devices",
+                            "x-name": "devices",
+                            "x-hidden": false,
+                            "type": "array",
+                            "x-required": true,
+                            "description": "List of devices to grant extended permissions to.",
+                            "x-position": 1,
+                            "items": {
+                                "title": "Device",
+                                "x-name": "device",
+                                "x-hidden": false,
+                                "format": "doover-resource-device",
+                                "type": "string",
+                                "x-required": true,
+                                "description": "Device ID",
+                                "pattern": "\\d+"
+                            }
+                        },
+                        "groups": {
+                            "title": "Groups",
+                            "x-name": "groups",
+                            "x-hidden": false,
+                            "type": "array",
+                            "x-required": true,
+                            "description": "List of groups to grant permissions to.",
+                            "x-position": 2,
+                            "items": {
+                                "title": "Group",
+                                "x-name": "group",
+                                "x-hidden": false,
+                                "format": "doover-resource-group",
+                                "type": "string",
+                                "x-required": true,
+                                "description": "Group ID",
+                                "pattern": "\\d+"
+                            }
+                        },
+                        "apps_installed": {
+                            "title": "Apps Installed",
+                            "x-name": "apps_installed",
+                            "x-hidden": false,
+                            "type": "array",
+                            "x-required": true,
+                            "description": "Permission will be given to any devices which have any of the apps listed installed.",
+                            "x-position": 3,
+                            "items": {
+                                "title": "Application",
+                                "x-name": "application",
+                                "x-hidden": false,
+                                "format": "doover-resource-application",
+                                "type": "string",
+                                "x-required": true,
+                                "description": "Application"
+                            }
+                        },
+                        "all_devices": {
+                            "title": "All Devices",
+                            "x-name": "all_devices",
+                            "x-hidden": false,
+                            "type": [
+                                "boolean",
+                                "null"
+                            ],
+                            "x-required": false,
+                            "description": "Permission will be given for all devices in this organisation. This is a very far-reaching permission to grant!",
+                            "default": false,
+                            "x-position": 4
+                        }
+                    },
+                    "additionalElements": true,
+                    "required": [
+                        "devices",
+                        "groups",
+                        "apps_installed"
+                    ],
+                    "x-collapsible": true,
+                    "x-defaultCollapsed": false
+                },
+                "dv_proc_schedules": {
+                    "title": "Schedule",
+                    "x-name": "dv_proc_schedules",
+                    "x-hidden": false,
+                    "format": "doover-schedule-cron-rate",
+                    "type": "string",
+                    "x-required": true,
+                    "description": "How often to reconcile assigned-device SIM cards against the M2M One account.",
+                    "x-position": 1
+                },
+                "account_id": {
+                    "title": "M2M One Account ID",
+                    "x-name": "account_id",
+                    "x-hidden": false,
+                    "type": "string",
+                    "x-required": true,
+                    "description": "The numeric account ID this integration is associated with. Used to flag SIMs that don't belong to this account.",
+                    "x-position": 2
+                },
+                "api_base_url": {
+                    "title": "API Base URL",
+                    "x-name": "api_base_url",
+                    "x-hidden": false,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Jasper Provision API base, no trailing slash. M2M One runs on the older Jasper 'Control Center 2' pod where the REST API lives at /provision/api/v1 (not /rws/api/v1).",
+                    "default": "https://m2mone.jasperwireless.com/provision/api/v1",
+                    "x-position": 3
+                },
+                "api_username": {
+                    "title": "API Username",
+                    "x-name": "api_username",
+                    "x-hidden": false,
+                    "type": "string",
+                    "x-required": true,
+                    "description": "Username for HTTP Basic auth against the Control Centre API.",
+                    "x-position": 4
+                },
+                "api_key": {
+                    "title": "API Key",
+                    "x-name": "api_key",
+                    "x-hidden": false,
+                    "type": "string",
+                    "x-required": true,
+                    "description": "Password/API key for HTTP Basic auth against the Control Centre API.",
+                    "x-position": 5
+                },
+                "dv_proc_ingestion": {
+                    "title": "Ingestion Endpoint",
+                    "x-name": "dv_proc_ingestion",
+                    "x-hidden": false,
+                    "type": "object",
+                    "x-required": true,
+                    "description": "Ingestion Endpoint configuration",
+                    "x-position": 6,
+                    "x-advanced": true,
+                    "properties": {
+                        "cidr_ranges": {
+                            "title": "CIDR Ranges",
+                            "x-name": "cidr_ranges",
+                            "x-hidden": false,
+                            "type": "array",
+                            "x-required": true,
+                            "description": "Accepted CIDR ranges for incoming requests",
+                            "x-position": 1,
+                            "items": {
+                                "title": "IP Range",
+                                "x-name": "ip_range",
+                                "x-hidden": false,
+                                "type": "string",
+                                "x-required": true,
+                                "description": "IP Range, e.g. 1.234.56.78/24 or 110.220.120.1/32"
+                            }
+                        },
+                        "signing_key": {
+                            "title": "Signing Key",
+                            "x-name": "signing_key",
+                            "x-hidden": false,
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "x-required": false,
+                            "description": "Private SHA256 signing key for the request. While not recommended, this may be `None` if no signed hash verification is required.",
+                            "default": "",
+                            "x-position": 2
+                        },
+                        "sha256_hash_header": {
+                            "title": "SHA256 Hash Header",
+                            "x-name": "sha256_hash_header",
+                            "x-hidden": false,
+                            "type": [
+                                "string",
+                                "null"
+                            ],
+                            "x-required": false,
+                            "description": "Header key for the hash of the signed payload (defaults to x-hmac-sha256 if signing_key is present)",
+                            "default": "x-hmac-sha256",
+                            "x-position": 3
+                        },
+                        "throttle": {
+                            "title": "Throttle",
+                            "x-name": "throttle",
+                            "x-hidden": false,
+                            "type": [
+                                "integer",
+                                "null"
+                            ],
+                            "x-required": false,
+                            "description": "The number of requests to allow per second. Due to internal limits, this cannot exceed 30.",
+                            "default": 10,
+                            "x-position": 4,
+                            "maximum": 30
+                        },
+                        "never_replace_token": {
+                            "title": "Never Replace Token",
+                            "x-name": "never_replace_token",
+                            "x-hidden": false,
+                            "type": [
+                                "boolean",
+                                "null"
+                            ],
+                            "x-required": false,
+                            "description": "Enable this if the token is difficult to change and must never change. This is not recommended from a security standpoint, however may be necessary in some situations.If this option is disabled and then enabled, a new token will be generated at that point.",
+                            "default": false,
+                            "x-position": 5
+                        },
+                        "mini_token": {
+                            "title": "Mini Token",
+                            "x-name": "mini_token",
+                            "x-hidden": false,
+                            "type": [
+                                "boolean",
+                                "null"
+                            ],
+                            "x-required": false,
+                            "description": "Enable this to generate a mini token for use with the ingestion endpoint. Mini tokens are ~70 bytes, compared with the ~900 bytes of a regular token. Generally, this is not advised as it adds complexity and latency to ingestion calls, however may be desirable in especially low-bandwidth and embedded environments. There is no security difference in the two tokens.",
+                            "default": false,
+                            "x-position": 6
+                        }
+                    },
+                    "additionalElements": true,
+                    "required": [
+                        "cidr_ranges"
+                    ],
+                    "x-collapsible": true,
+                    "x-defaultCollapsed": false
+                }
+            },
+            "additionalElements": true,
+            "required": [
+                "dv_proc_extended_permissions",
+                "dv_proc_schedules",
+                "account_id",
+                "api_username",
+                "api_key",
+                "dv_proc_ingestion"
+            ]
+        },
+        "organisation_id": null,
+        "container_registry_profile_id": null,
+        "id": 182371181976942351,
+        "key": null,
+        "owner_org_id": null,
+        "code_repo_id": null,
+        "repo_branch": "main",
+        "ui_schema": null,
+        "icon_url": null,
+        "banner_url": null,
+        "staging_config": {},
+        "build_widget_command": null,
+        "run_command": null,
+        "lambda_arn": null
+    }
+}

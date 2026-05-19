@@ -1,0 +1,29 @@
+[project]
+name = "m2mone-integration"
+version = "0.1.0"
+description = "Doover integration that looks up assigned-device SIM cards in M2M One's Control Centre and records the result on each device's m2m-simcard channel."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "aiohttp>=3.11.18",
+    "pydoover>=0.4.13",
+]
+
+[project.scripts]
+export-config_integration = "integration.app_config:export"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/integration"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.26.0",
+]
+
+[tool.uv.sources]
+pydoover = { git = "https://github.com/getdoover/pydoover", branch = "main" }
