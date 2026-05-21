@@ -16,6 +16,7 @@ usage for every SIM — no per-ICCID round-trip needed.
 """
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from enum import Enum
@@ -106,6 +107,24 @@ class M2MOneClient:
             if len(rows) < PAGE_SIZE:
                 return sims
             page += 1
+
+    async def get_sim(self, iccid: str) -> dict[str, Any] | None:
+        """Look up a single SIM by ICCID, returning its row or ``None``.
+
+        This pod's ``/sims/{iccid}`` path doesn't exist (404) and the obvious
+        query params are ignored, but the grid's own server-side filter works:
+        ``?search=[{"property":"iccid","value":"<iccid>"}]`` returns just the
+        matching SIM (same row shape as ``list_sims``, usage included). An
+        unknown ICCID comes back as an empty result, which maps to ``None``.
+        """
+        payload = await self._get(
+            "/sims",
+            params={"search": json.dumps([{"property": "iccid", "value": iccid}])},
+        )
+        for row in _extract_list(payload):
+            if str(row.get("iccid") or row.get("ICCID") or "") == iccid:
+                return row
+        return None
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         assert self._session is not None, "M2MOneClient must be used as an async context manager"

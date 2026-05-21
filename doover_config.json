@@ -128,6 +128,19 @@
                     "description": "How often to reconcile assigned-device SIM cards against the M2M One account.",
                     "x-position": 1
                 },
+                "dv_egress_channel": {
+                    "title": "Egress Channel",
+                    "x-name": "dv_egress_channel",
+                    "x-hidden": true,
+                    "type": [
+                        "string",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "Channel to subscribe on every device configured.",
+                    "default": "dv-hardware",
+                    "x-position": 2
+                },
                 "account_id": {
                     "title": "M2M One Account ID",
                     "x-name": "account_id",
@@ -135,7 +148,7 @@
                     "type": "string",
                     "x-required": true,
                     "description": "The numeric account ID this integration is associated with. Used to flag SIMs that don't belong to this account.",
-                    "x-position": 2
+                    "x-position": 3
                 },
                 "api_base_url": {
                     "title": "API Base URL",
@@ -148,7 +161,7 @@
                     "x-required": false,
                     "description": "Jasper Provision API base, no trailing slash. M2M One runs on the older Jasper 'Control Center 2' pod where the REST API lives at /provision/api/v1 (not /rws/api/v1).",
                     "default": "https://m2mone.jasperwireless.com/provision/api/v1",
-                    "x-position": 3
+                    "x-position": 4
                 },
                 "api_username": {
                     "title": "API Username",
@@ -157,7 +170,7 @@
                     "type": "string",
                     "x-required": true,
                     "description": "Username for HTTP Basic auth against the Control Centre API.",
-                    "x-position": 4
+                    "x-position": 5
                 },
                 "api_key": {
                     "title": "API Key",
@@ -166,7 +179,7 @@
                     "type": "string",
                     "x-required": true,
                     "description": "Password/API key for HTTP Basic auth against the Control Centre API.",
-                    "x-position": 5
+                    "x-position": 6
                 },
                 "dv_proc_ingestion": {
                     "title": "Ingestion Endpoint",
@@ -175,7 +188,7 @@
                     "type": "object",
                     "x-required": true,
                     "description": "Ingestion Endpoint configuration",
-                    "x-position": 6,
+                    "x-position": 7,
                     "x-advanced": true,
                     "properties": {
                         "cidr_ranges": {

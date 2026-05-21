@@ -261,7 +261,7 @@ function StatusBadge({ status }: { status: SimRow["status"] }) {
     case "not_in_account":
       return (
         <Badge variant="warning">
-          <AlertTriangle /> Unmatched
+          <HelpCircle /> Unknown
         </Badge>
       );
     case "error":
@@ -381,11 +381,6 @@ function SimRowView({ row, heavyThresholdMb }: { row: SimRow; heavyThresholdMb: 
         >
           {row.deviceName}
         </Link>
-        {row.provider && (
-          <span className="ml-2 align-middle">
-            <Badge variant="outline">{row.provider}</Badge>
-          </span>
-        )}
       </td>
       <td className="px-2 py-1.5 font-mono text-[0.6875rem] text-muted-foreground">
         {row.iccid ?? "—"}

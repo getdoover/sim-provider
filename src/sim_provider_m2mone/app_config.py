@@ -4,6 +4,7 @@ from pydoover import config
 from pydoover.processor import (
     ExtendedPermissionsConfig,
     ScheduleConfig,
+    EgressChannelConfig,
     IngestionEndpointConfig,
 )
 
@@ -15,6 +16,11 @@ class M2MOneSimProviderConfig(config.Schema):
         description="How often to reconcile assigned-device SIM cards against the M2M One account.",
         allowed_modes=["cron", "rate"],
     )
+    # Subscribe to the dv-hardware channel on every permitted device so the
+    # integration reconciles a device the moment its hardware aggregate
+    # changes (e.g. a SIM swap), rather than only on the schedule. Hidden with
+    # a sensible default so operators don't have to think about it.
+    egress_channel = EgressChannelConfig(default="dv-hardware")
 
     account_id = config.String(
         "M2M One Account ID",

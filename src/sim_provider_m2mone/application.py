@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from pydoover.processor import Application
-from pydoover.models import DeploymentEvent, ScheduleEvent
+from pydoover.models import ScheduleEvent, ManualInvokeEvent, AggregateUpdateEvent
 
 from .app_config import M2MOneSimProviderConfig
 from .m2mone_client import LookupStatus, M2MOneClient, M2MOneError, SimLookup
@@ -23,10 +23,43 @@ class M2MOneSimProviderApp(Application):
     async def on_schedule(self, event: ScheduleEvent):
         await self._scan("schedule")
 
-    async def on_deployment(self, event: DeploymentEvent):
-        # Re-saving the integration's config in the UI fires a deployment event,
-        # so this doubles as an operator-triggered refresh.
+    async def on_manual_invoke(self, event: ManualInvokeEvent):
+        await self._scan("manual_invoke")
+
+    async def on_deployment(self, event: ManualInvokeEvent):
         await self._scan("deployment")
+
+    async def on_aggregate_update(self, event: AggregateUpdateEvent):
+        """React in real-time when a permitted device updates its dv-hardware aggregate.
+
+        The integration subscribes to ``dv-hardware`` on every permitted device
+        (see ``EgressChannelConfig`` in app_config), so this fires per-device as
+        soon as a device's hardware state changes. ``event.channel.agent_id`` is
+        the source device (not this integration's own agent).
+        """
+        if event.channel.name != HARDWARE_CHANNEL:
+            return
+
+        agent_id = event.channel.agent_id
+        data = event.aggregate.data or {}
+        modem = _extract_modem(data)
+        iccid = _extract_iccid(data, modem)
+        if not iccid:
+            log.info("Agent %s dv-hardware update has no SIM ICCID; skipping", agent_id)
+            return
+
+        log.info("Agent %s dv-hardware updated (ICCID %s); reconciling", agent_id, iccid)
+        async with M2MOneClient(
+            base_url=self.config.api_base_url.value,
+            username=self.config.api_username.value,
+            api_key=self.config.api_key.value,
+        ) as client:
+            try:
+                row = await client.get_sim(iccid)
+            except M2MOneError as e:
+                log.error("Failed to look up ICCID %s on M2M One: %s; aborting reconcile", iccid, e)
+                return
+            await self._reconcile_device(agent_id, iccid, modem, row)
 
     async def _scan(self, trigger: str) -> None:
         devices: list[int] = self.received_deployment_config.get("DEVICE_LIST", []) or []
@@ -34,8 +67,12 @@ class M2MOneSimProviderApp(Application):
         if not devices:
             return
 
-        iccids = await self._fetch_iccids(devices)
-        log.info("Resolved ICCIDs for %d/%d device(s)", sum(1 for v in iccids.values() if v), len(devices))
+        hardware = await self._fetch_hardware(devices)
+        log.info(
+            "Resolved ICCIDs for %d/%d device(s)",
+            sum(1 for iccid, _ in hardware.values() if iccid),
+            len(devices),
+        )
 
         async with M2MOneClient(
             base_url=self.config.api_base_url.value,
@@ -51,42 +88,54 @@ class M2MOneSimProviderApp(Application):
 
             await asyncio.gather(
                 *(
-                    self._reconcile_device(agent_id, iccids.get(agent_id), account_sims)
-                    for agent_id in devices
+                    self._reconcile_device(agent_id, iccid, modem, account_sims.get(iccid))
+                    for agent_id, (iccid, modem) in (
+                        (a, hardware.get(a, (None, {}))) for a in devices
+                    )
                 )
             )
 
-    async def _fetch_iccids(self, agent_ids: list[int]) -> dict[int, str | None]:
-        """Pull the SIM ICCID out of every device's dv-hardware aggregate in one call."""
+    async def _fetch_hardware(
+        self, agent_ids: list[int]
+    ) -> dict[int, tuple[str | None, dict[str, Any]]]:
+        """Pull each device's SIM ICCID and modem block from dv-hardware in one call."""
+        empty: dict[int, tuple[str | None, dict[str, Any]]] = {
+            agent_id: (None, {}) for agent_id in agent_ids
+        }
         try:
             batch = await self.api.fetch_multi_agent_aggregates(HARDWARE_CHANNEL, agent_ids)
         except Exception as e:
             log.warning("Multi-agent fetch of %s failed: %s; falling back to no-op", HARDWARE_CHANNEL, e)
-            return {agent_id: None for agent_id in agent_ids}
+            return empty
 
-        result: dict[int, str | None] = {agent_id: None for agent_id in agent_ids}
+        result = dict(empty)
         for entry in batch.results:
             data = entry.aggregate.data or {}
-            modem = data.get("modem") or {}
-            iccid = modem.get("sim_iccid") or data.get("sim_iccid")
-            if iccid:
-                result[int(entry.agent_id)] = str(iccid)
+            modem = _extract_modem(data)
+            result[int(entry.agent_id)] = (_extract_iccid(data, modem), modem)
         return result
 
     async def _reconcile_device(
         self,
         agent_id: int,
         iccid: str | None,
-        account_sims: dict[str, dict[str, Any]],
+        modem: dict[str, Any],
+        row: dict[str, Any] | None,
     ) -> None:
         if not iccid:
             log.info("Agent %s has no SIM ICCID in %s; skipping", agent_id, HARDWARE_CHANNEL)
             return
 
-        row = account_sims.get(iccid)
         if row is None:
+            # The SIM isn't in this provider's account, so we can't classify it.
+            # Still write what the device itself reports about the modem so the
+            # SIM stays visible (with its ICCID) on the dashboard as unknown.
             log.info("Agent %s ICCID %s not found in M2M One account", agent_id, iccid)
-            lookup = SimLookup(iccid=iccid, status=LookupStatus.NOT_IN_ACCOUNT)
+            lookup = SimLookup(
+                iccid=iccid,
+                status=LookupStatus.NOT_IN_ACCOUNT,
+                details=modem or None,
+            )
         else:
             log.info("Agent %s ICCID %s matched in M2M One account", agent_id, iccid)
             lookup = SimLookup(
@@ -109,6 +158,16 @@ class M2MOneSimProviderApp(Application):
             await self.api.create_message(SIM_CHANNEL, payload, agent_id=agent_id)
         except Exception as e:
             log.warning("Failed to write %s for agent %s: %s", SIM_CHANNEL, agent_id, e)
+
+
+def _extract_modem(data: dict[str, Any]) -> dict[str, Any]:
+    """The device-reported modem block from a dv-hardware aggregate."""
+    return data.get("modem") or {}
+
+
+def _extract_iccid(data: dict[str, Any], modem: dict[str, Any]) -> str | None:
+    iccid = modem.get("sim_iccid") or data.get("sim_iccid")
+    return str(iccid) if iccid else None
 
 
 def _extract_usage(row: dict[str, Any]) -> dict[str, Any]:
