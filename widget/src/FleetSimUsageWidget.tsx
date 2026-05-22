@@ -1,7 +1,10 @@
 import "./styles.css";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
+import dayjs from "dayjs";
+
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 
 import RemoteComponentWrapper from "customer_site/RemoteComponentWrapper";
 import { useRemoteParams } from "customer_site/useRemoteParams";
@@ -13,11 +16,13 @@ import {
   type DeviceMapEntry,
 } from "doover-js/react";
 
-import { AlertTriangle, CheckCircle2, HelpCircle, Signal, SignalZero, TrendingUp, X } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ExternalLink, HelpCircle, Signal, SignalZero, TrendingUp, X } from "lucide-react";
 
 import { cn } from "./components/ui/utils";
 import { Badge } from "./components/ui/badge";
+import { Button } from "./components/ui/button";
 import { Card, CardContent } from "./components/ui/card";
+import { Dialog, DialogContent, DialogTitle } from "./components/ui/dialog";
 import {
   buildRow,
   computeTotals,
@@ -25,10 +30,13 @@ import {
   formatRelTime,
   num,
   sortRows,
+  usagePoints,
   type SimAggregate,
   type SimRow,
+  type SimUsageDaily,
   type SortDir,
   type SortKey,
+  type UsagePoint,
 } from "./lib/sim";
 
 const DEFAULT_HEAVY_USER_THRESHOLD_MB = 500;
@@ -78,6 +86,19 @@ function FleetSimUsageWidgetInner({ uiElement }: { uiElement: UiRemoteComponentF
     deviceIds,
   );
 
+  // Per-day usage history (written only when the integration's "Record Daily
+  // Data Usage" toggle is on). Absent aggregates simply yield no chart.
+  const { aggregatesByAgent: usageByAgent } = useMultiAgentAggregates<SimUsageDaily>(
+    "sim-usage-daily",
+    deviceIds,
+  );
+
+  const usageByAgentId = useMemo(() => {
+    const out: Record<string, UsagePoint[]> = {};
+    for (const id of deviceIds) out[id] = usagePoints(usageByAgent[id]);
+    return out;
+  }, [deviceIds, usageByAgent]);
+
   const rows: SimRow[] = useMemo(() => {
     return devices.map((entry: DeviceMapEntry) =>
       buildRow(entry, aggregatesByAgent[entry.id]),
@@ -89,6 +110,47 @@ function FleetSimUsageWidgetInner({ uiElement }: { uiElement: UiRemoteComponentF
   const [sortKey, setSortKey] = useState<SortKey>("data");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [search, setSearch] = useState("");
+  const [detailAgentId, setDetailAgentId] = useState<string | null>(null);
+
+  const detailRow = useMemo(
+    () => rows.find((r) => r.agentId === detailAgentId) ?? null,
+    [rows, detailAgentId],
+  );
+  const detailData = detailAgentId ? aggregatesByAgent[detailAgentId]?.data : undefined;
+  const detailUsage = detailAgentId ? usageByAgentId[detailAgentId] ?? [] : [];
+
+  // Sync the open device into the URL as `?device=<agentId>` so the view is
+  // shareable. Use `history.replaceState` directly rather than react-router's
+  // setSearchParams — routing the change through the router re-renders the
+  // host shell (breadcrumbs/chrome) mid-open and reads as a flicker; the raw
+  // history API updates the address bar without touching router state.
+  const writeDeviceParam = (agentId: string | null) => {
+    const url = new URL(window.location.href);
+    if (agentId) url.searchParams.set("device", agentId);
+    else url.searchParams.delete("device");
+    window.history.replaceState(window.history.state, "", url.toString());
+  };
+  const openDetail = (r: SimRow) => {
+    setDetailAgentId(r.agentId);
+    writeDeviceParam(r.agentId);
+  };
+  const closeDetail = () => {
+    setDetailAgentId(null);
+    writeDeviceParam(null);
+  };
+
+  // Deep-link: on first render after rows resolve, open the dialog if the URL
+  // already carries a `?device=…` we recognise. Read straight from
+  // window.location (not useSearchParams) so later same-key writes don't
+  // re-trigger this.
+  const deepLinkAppliedRef = useRef(false);
+  useEffect(() => {
+    if (deepLinkAppliedRef.current) return;
+    if (rows.length === 0) return;
+    const id = new URLSearchParams(window.location.search).get("device");
+    if (id && rows.some((r) => r.agentId === id)) setDetailAgentId(id);
+    deepLinkAppliedRef.current = true;
+  }, [rows]);
 
   const onSort = (k: SortKey) => {
     if (k === sortKey) {
@@ -140,6 +202,14 @@ function FleetSimUsageWidgetInner({ uiElement }: { uiElement: UiRemoteComponentF
         sortDir={sortDir}
         onSort={onSort}
         heavyThresholdMb={heavyThresholdMb}
+        onOpenDetail={openDetail}
+      />
+      <SimDetailDialog
+        row={detailRow}
+        data={detailData}
+        usage={detailUsage}
+        heavyThresholdMb={heavyThresholdMb}
+        onClose={closeDetail}
       />
     </div>
   );
@@ -327,12 +397,14 @@ function SimTable({
   sortDir,
   onSort,
   heavyThresholdMb,
+  onOpenDetail,
 }: {
   rows: SimRow[];
   sortKey: SortKey;
   sortDir: SortDir;
   onSort: (k: SortKey) => void;
   heavyThresholdMb: number;
+  onOpenDetail: (r: SimRow) => void;
 }) {
   if (rows.length === 0) {
     return (
@@ -359,7 +431,12 @@ function SimTable({
             </thead>
             <tbody>
               {rows.map((r) => (
-                <SimRowView key={r.agentId} row={r} heavyThresholdMb={heavyThresholdMb} />
+                <SimRowView
+                  key={r.agentId}
+                  row={r}
+                  heavyThresholdMb={heavyThresholdMb}
+                  onOpenDetail={onOpenDetail}
+                />
               ))}
             </tbody>
           </table>
@@ -369,19 +446,23 @@ function SimTable({
   );
 }
 
-function SimRowView({ row, heavyThresholdMb }: { row: SimRow; heavyThresholdMb: number }) {
+function SimRowView({
+  row,
+  heavyThresholdMb,
+  onOpenDetail,
+}: {
+  row: SimRow;
+  heavyThresholdMb: number;
+  onOpenDetail: (r: SimRow) => void;
+}) {
   const heavy = row.dataMb != null && row.dataMb > heavyThresholdMb;
   return (
-    <tr className="border-b border-border/60 last:border-b-0 hover:bg-muted/30">
-      <td className="px-2 py-1.5">
-        <Link
-          to={`/agent/${row.agentId}`}
-          className="font-medium text-foreground hover:underline"
-          title={`Open ${row.deviceName}`}
-        >
-          {row.deviceName}
-        </Link>
-      </td>
+    <tr
+      className="cursor-pointer border-b border-border/60 last:border-b-0 hover:bg-muted/30"
+      onClick={() => onOpenDetail(row)}
+      title={`View details for ${row.deviceName}`}
+    >
+      <td className="px-2 py-1.5 font-medium text-foreground">{row.deviceName}</td>
       <td className="px-2 py-1.5 font-mono text-[0.6875rem] text-muted-foreground">
         {row.iccid ?? "—"}
       </td>
@@ -403,5 +484,130 @@ function SimRowView({ row, heavyThresholdMb }: { row: SimRow; heavyThresholdMb: 
         {formatRelTime(row.checkedAtMs)}
       </td>
     </tr>
+  );
+}
+
+// ---------------------------------------------------------------------------
+/** Row-click detail modal: device info, a link to the device page, and the
+ *  per-day usage chart (when the integration is recording usage history). */
+function SimDetailDialog({
+  row,
+  data,
+  usage,
+  heavyThresholdMb,
+  onClose,
+}: {
+  row: SimRow | null;
+  data: SimAggregate | undefined;
+  usage: UsagePoint[];
+  heavyThresholdMb: number;
+  onClose: () => void;
+}) {
+  const details = (data?.details ?? null) as Record<string, unknown> | null;
+  const detailString = (key: string): string | null => {
+    const v = details?.[key];
+    return typeof v === "string" || typeof v === "number" ? String(v) : null;
+  };
+
+  const heavy = row?.dataMb != null && row.dataMb > heavyThresholdMb;
+  const usageTotal = usage.reduce((s, p) => s + p.data_mb, 0);
+
+  return (
+    <Dialog open={row != null} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <DialogContent initialFocus={false} className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center gap-2 pr-10">
+          <DialogTitle className="truncate text-base">{row?.deviceName ?? ""}</DialogTitle>
+          {row && (
+            <Button
+              variant="outline"
+              size="sm"
+              render={<Link to={`/agent/${row.agentId}`} tabIndex={-1} onClick={onClose} />}
+              title="Open this device's dashboard page"
+            >
+              <ExternalLink />
+              <span>Open device page</span>
+            </Button>
+          )}
+        </div>
+
+        {row && (
+          <>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs sm:grid-cols-3">
+              <Detail label="Status"><StatusBadge status={row.status} /></Detail>
+              <Detail label="Data (MTD)">
+                <span className={cn("tabular-nums", heavy && "font-semibold text-amber-700 dark:text-amber-400")}>
+                  {formatMb(row.dataMb)}
+                </span>
+              </Detail>
+              <Detail label="Overage">{row.overage ? <Badge variant="destructive">over limit</Badge> : "No"}</Detail>
+              <Detail label="ICCID" className="col-span-2 sm:col-span-3">
+                <span className="font-mono text-[0.6875rem]">{row.iccid ?? "—"}</span>
+              </Detail>
+              <Detail label="MSISDN">{detailString("msisdn") ?? "—"}</Detail>
+              <Detail label="Rate plan" className="col-span-2 sm:col-span-2">{detailString("ratePlanName") ?? "—"}</Detail>
+              <Detail label="Provider">{row.provider ?? "—"}</Detail>
+              <Detail label="Checked">{formatRelTime(row.checkedAtMs)}</Detail>
+            </dl>
+
+            <div className="mt-1 border-t border-border pt-3">
+              <div className="mb-2 text-xs text-muted-foreground">
+                {usage.length > 0
+                  ? `Daily data · last ${usage.length} day${usage.length === 1 ? "" : "s"} · ${formatMb(usageTotal)} total`
+                  : "Daily data"}
+              </div>
+              {usage.length > 0 ? (
+                <UsageChart points={usage} />
+              ) : (
+                <div className="rounded-md border border-dashed border-border py-6 text-center text-xs text-muted-foreground">
+                  No daily usage recorded. Enable “Record Daily Data Usage” on the SIM provider integration.
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function Detail({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+  return (
+    <div className={className}>
+      <dt className="text-[0.625rem] uppercase tracking-wide text-muted-foreground">{label}</dt>
+      <dd className="mt-0.5">{children}</dd>
+    </div>
+  );
+}
+
+function UsageChart({ points }: { points: UsagePoint[] }) {
+  const data = points.map((p) => ({ t: p.timestamp, mb: p.data_mb }));
+  return (
+    <div className="h-48 w-full">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" className="stroke-border" vertical={false} />
+          <XAxis
+            dataKey="t"
+            tickFormatter={(t) => dayjs(t).format("D MMM")}
+            tick={{ fontSize: 10 }}
+            minTickGap={24}
+            tickLine={false}
+          />
+          <YAxis
+            tick={{ fontSize: 10 }}
+            width={42}
+            tickFormatter={(v) => (v >= 1024 ? `${(v / 1024).toFixed(1)}G` : `${Math.round(v)}M`)}
+            tickLine={false}
+          />
+          <Tooltip
+            cursor={{ className: "fill-muted/40" }}
+            labelFormatter={(t) => dayjs(Number(t)).format("ddd D MMM YYYY")}
+            formatter={(v: number) => [formatMb(v), "Data"]}
+            contentStyle={{ fontSize: 12 }}
+          />
+          <Bar dataKey="mb" className="fill-primary" radius={[2, 2, 0, 0]} />
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   );
 }

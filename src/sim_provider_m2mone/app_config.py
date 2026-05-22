@@ -43,6 +43,17 @@ class M2MOneSimProviderConfig(config.Schema):
         name="api_key",
         description="Password/API key for HTTP Basic auth against the Control Centre API.",
     )
+    record_data_usage = config.Boolean(
+        "Record Daily Data Usage",
+        name="record_data_usage",
+        default=True,
+        description=(
+            "When enabled, each scan also pulls every in-account SIM's per-day "
+            "data-usage history from M2M One and writes it to the sim-usage-daily "
+            "channel, so the dashboard can chart it. Adds one API call per device "
+            "per scan."
+        ),
+    )
     fixme = IngestionEndpointConfig(advanced=True)
 
 

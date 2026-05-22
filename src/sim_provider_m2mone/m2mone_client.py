@@ -18,7 +18,9 @@ from __future__ import annotations
 
 import json
 import logging
+from collections import defaultdict
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
@@ -27,6 +29,11 @@ import aiohttp
 log = logging.getLogger(__name__)
 
 PAGE_SIZE = 50
+# Data-traffic CDRs are fetched newest-first and paged until we cross the
+# requested window. A heavy SIM can log many records per day, so use a larger
+# page than the SIM inventory.
+CDR_PAGE_SIZE = 500
+MS_PER_DAY = 86_400_000
 
 # M2M One wraps the list under `data`; other Jasper Provision deployments use
 # different keys, so we look for any of these and bail if none match.
@@ -125,6 +132,59 @@ class M2MOneClient:
             if str(row.get("iccid") or row.get("ICCID") or "") == iccid:
                 return row
         return None
+
+    async def get_daily_usage(self, sim_id: int | str, days: int = 30) -> list[dict[str, float]]:
+        """Return per-day data usage for the last ``days`` days as a time series.
+
+        Built from the ``/dataTrafficDetails`` CDR feed (keyed by ``simId``, the
+        same id ``get_sim``/``list_sims`` rows carry). Each record has a
+        ``recordOpenTime`` (epoch ms) and ``roundedUsageKB``; we bucket those by
+        UTC day. The endpoint won't filter by date server-side (those filter
+        types 500), so we page newest-first and stop once we cross the window.
+
+        Returns a chronological list of ``{"timestamp": <ms>, "data_mb": <float>}``
+        points, where ``timestamp`` is epoch-milliseconds at midnight UTC of the
+        day (doover's platform-wide timestamp convention). Only days with usage
+        are included.
+        """
+        cutoff_ms = int((datetime.now(tz=timezone.utc) - timedelta(days=days)).timestamp() * 1000)
+        search = json.dumps([{"property": "simId", "type": "LONG_EQUALS", "value": int(sim_id), "id": "simId"}])
+
+        per_day_kb: dict[int, float] = defaultdict(float)
+        page = 1
+        while True:
+            payload = await self._get(
+                "/dataTrafficDetails",
+                params={
+                    "page": page,
+                    "limit": CDR_PAGE_SIZE,
+                    "sort": "recordOpenTime",
+                    "dir": "DESC",
+                    "search": search,
+                },
+            )
+            rows = _extract_list(payload)
+            reached_cutoff = False
+            for row in rows:
+                ts = row.get("recordOpenTime") or row.get("recordCloseTime")
+                if not isinstance(ts, (int, float)):
+                    continue
+                ts = int(ts)
+                if ts < cutoff_ms:
+                    reached_cutoff = True
+                    continue
+                # Floor to midnight UTC; the epoch is itself midnight-UTC aligned.
+                day_ms = ts - (ts % MS_PER_DAY)
+                per_day_kb[day_ms] += row.get("roundedUsageKB") or 0.0
+
+            if reached_cutoff or len(rows) < CDR_PAGE_SIZE:
+                break
+            page += 1
+
+        return [
+            {"timestamp": day_ms, "data_mb": round(kb / 1024.0, 3)}
+            for day_ms, kb in sorted(per_day_kb.items())
+        ]
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         assert self._session is not None, "M2MOneClient must be used as an async context manager"

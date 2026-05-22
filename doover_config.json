@@ -181,6 +181,19 @@
                     "description": "Password/API key for HTTP Basic auth against the Control Centre API.",
                     "x-position": 6
                 },
+                "record_data_usage": {
+                    "title": "Record Daily Data Usage",
+                    "x-name": "record_data_usage",
+                    "x-hidden": false,
+                    "type": [
+                        "boolean",
+                        "null"
+                    ],
+                    "x-required": false,
+                    "description": "When enabled, each scan also pulls every in-account SIM's per-day data-usage history from M2M One and writes it to the sim-usage-daily channel, so the dashboard can chart it. Adds one API call per device per scan.",
+                    "default": false,
+                    "x-position": 7
+                },
                 "dv_proc_ingestion": {
                     "title": "Ingestion Endpoint",
                     "x-name": "dv_proc_ingestion",
@@ -188,7 +201,7 @@
                     "type": "object",
                     "x-required": true,
                     "description": "Ingestion Endpoint configuration",
-                    "x-position": 7,
+                    "x-position": 8,
                     "x-advanced": true,
                     "properties": {
                         "cidr_ranges": {

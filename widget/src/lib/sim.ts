@@ -17,6 +17,29 @@ export interface SimAggregate {
   configured_account_id: string;
 }
 
+/** One day's data usage. `timestamp` is epoch-ms at midnight UTC (doover convention). */
+export interface UsagePoint {
+  timestamp: number;
+  data_mb: number;
+}
+
+/** Shape of the `sim-usage-daily` aggregate the provider integration writes. */
+export interface SimUsageDaily {
+  provider: string;
+  window_days: number;
+  daily: UsagePoint[];
+}
+
+/** Pull a clean, validated daily series out of a `sim-usage-daily` aggregate. */
+export function usagePoints(agg: Aggregate<SimUsageDaily> | undefined): UsagePoint[] {
+  const daily = agg?.data?.daily;
+  if (!Array.isArray(daily)) return [];
+  return daily.filter(
+    (p): p is UsagePoint =>
+      typeof p?.timestamp === "number" && typeof p?.data_mb === "number",
+  );
+}
+
 export interface SimUsage {
   month_to_date_data_mb?: number | null;
   month_to_date_sms?: number | null;

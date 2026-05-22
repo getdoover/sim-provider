@@ -13,7 +13,9 @@ log = logging.getLogger(__name__)
 
 HARDWARE_CHANNEL = "dv-hardware"
 SIM_CHANNEL = "sim-card"
+USAGE_CHANNEL = "sim-usage-daily"
 PROVIDER = "m2mone"
+USAGE_HISTORY_DAYS = 30
 
 
 class M2MOneSimProviderApp(Application):
@@ -86,14 +88,44 @@ class M2MOneSimProviderApp(Application):
                 return
             log.info("Account has %d SIM(s) registered", len(account_sims))
 
+            record_usage = bool(self.config.record_data_usage.value)
+
+            async def handle(agent_id: int, iccid: str | None, modem: dict[str, Any]) -> None:
+                row = account_sims.get(iccid) if iccid else None
+                await self._reconcile_device(agent_id, iccid, modem, row)
+                if record_usage and row is not None:
+                    await self._write_daily_usage(client, agent_id, row.get("simId"))
+
             await asyncio.gather(
                 *(
-                    self._reconcile_device(agent_id, iccid, modem, account_sims.get(iccid))
+                    handle(agent_id, iccid, modem)
                     for agent_id, (iccid, modem) in (
                         (a, hardware.get(a, (None, {}))) for a in devices
                     )
                 )
             )
+
+    async def _write_daily_usage(self, client: M2MOneClient, agent_id: int, sim_id: Any) -> None:
+        """Fetch the SIM's per-day usage history and write it to the usage channel."""
+        if not sim_id:
+            return
+        try:
+            series = await client.get_daily_usage(sim_id, days=USAGE_HISTORY_DAYS)
+        except M2MOneError as e:
+            log.warning("Failed to fetch daily usage for agent %s (simId %s): %s", agent_id, sim_id, e)
+            return
+
+        payload = {
+            "provider": PROVIDER,
+            "window_days": USAGE_HISTORY_DAYS,
+            "daily": series,
+        }
+        try:
+            await self.api.update_channel_aggregate(
+                USAGE_CHANNEL, payload, replace_data=True, agent_id=agent_id
+            )
+        except Exception as e:
+            log.warning("Failed to write %s for agent %s: %s", USAGE_CHANNEL, agent_id, e)
 
     async def _fetch_hardware(
         self, agent_ids: list[int]
