@@ -191,7 +191,7 @@
                     ],
                     "x-required": false,
                     "description": "When enabled, each scan also pulls every in-account SIM's per-day data-usage history from M2M One and writes it to the sim-usage-daily channel, so the dashboard can chart it. Adds one API call per device per scan.",
-                    "default": false,
+                    "default": true,
                     "x-position": 7
                 },
                 "dv_proc_ingestion": {
